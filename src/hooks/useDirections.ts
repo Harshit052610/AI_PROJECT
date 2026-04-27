@@ -3,7 +3,7 @@ import L from 'leaflet';
 import { LatLng, RouteInfo, NavigationState } from '@/types/map';
 
 export const useDirections = (map: L.Map | null) => {
-  const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM4ZTNiZTBhYTNkYzRmMzJiNDVhMWQ4NjljYThkYjE5IiwiaCI6Im11cm11cjY0In0='; // Replace with your ORS API key
+  const LOCATIONIQ_API_KEY = 'pk.ef423b51534f51549c9d54f6fbd88d65'; // Your LocationIQ API key
 
   const [navigationState, setNavigationState] = useState<NavigationState>({
     isNavigating: false,
@@ -29,59 +29,56 @@ export const useDirections = (map: L.Map | null) => {
       accidentZones: any[] = [],
       safeShops: any[] = []
     ): Promise<{ routes: RouteInfo[]; status?: string }> => {
-      if (!ORS_API_KEY || ORS_API_KEY === 'YOUR_OPENROUTESERVICE_API_KEY') {
-        console.error('OpenRouteService API key is not set.');
+      if (!LOCATIONIQ_API_KEY || LOCATIONIQ_API_KEY === 'YOUR_LOCATIONIQ_API_KEY') {
+        console.error('LocationIQ API key is not set.');
         return { routes: [], status: 'API_KEY_MISSING' };
       }
 
-      const profile = travelMode.toLowerCase(); // ORS profiles are lowercase (e.g., 'driving-car')
-      const coordinates = `${origin.lng},${origin.lat}|${destination.lng},${destination.lat}`;
-      const apiUrl = `https://api.openrouteservice.org/v2/directions/${profile}/geojson`;
+      const profile = travelMode.toLowerCase(); // LocationIQ profiles are lowercase (e.g., 'driving')
+      const coordinates = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
+      const apiUrl = `https://api.locationiq.com/v1/directions/${profile}/?key=${LOCATIONIQ_API_KEY}&overview=full&coordinates=${coordinates}`;
+      console.log('LocationIQ API URL:', apiUrl);
 
       try {
         const response = await fetch(apiUrl, {
-          method: 'POST',
+          method: 'GET', // LocationIQ uses GET for directions
           headers: {
-            'Accept': 'application/json, application/geo+json, application/gpx+xml, application/x-protobuf',
-            'Content-Type': 'application/json',
-            'Authorization': ORS_API_KEY,
+            'Accept': 'application/json',
           },
-          body: JSON.stringify({
-            coordinates: [[origin.lng, origin.lat], [destination.lng, destination.lat]],
-          }),
         });
+        console.log('LocationIQ raw response:', response);
 
         if (!response.ok) {
           const errorBody = await response.json();
-          console.error('ORS API error:', errorBody);
-          return { routes: [], status: `ORS_ERROR: ${errorBody.error.message}` };
+          console.error('LocationIQ API error:', errorBody);
+          return { routes: [], status: `LOCATIONIQ_ERROR: ${errorBody.error}` };
         }
 
         const data = await response.json();
-        if (data.features && data.features.length > 0) {
-          const routeFeature = data.features[0];
-          const routeCoordinates = routeFeature.geometry.coordinates.map((coord: [number, number]) => ({
+        console.log('LocationIQ raw data:', data);
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          const routeCoordinates = route.geometry.coordinates.map((coord: [number, number]) => ({
             lng: coord[0],
             lat: coord[1],
           }));
 
-          // Convert ORS polyline to Leaflet LatLng array
+          // Convert LocationIQ polyline to Leaflet LatLng array
           const leafletPolyline: LatLng[] = routeCoordinates.map((coord: LatLng) => ({
             lat: coord.lat,
             lng: coord.lng,
           }));
 
-          // Dummy values for now, will refine later
-          const distance = (routeFeature.properties.summary.distance / 1000).toFixed(1) + ' km';
-          const duration = Math.round(routeFeature.properties.summary.duration / 60) + ' min';
+          const distance = (route.distance / 1000).toFixed(1) + ' km';
+          const duration = Math.round(route.duration / 60) + ' min';
 
           const routes: RouteInfo[] = [{
-            id: 'ors-route-1',
+            id: 'locationiq-route-1',
             distance: distance,
             duration: duration,
             safetyScore: 80, // Placeholder
             polyline: leafletPolyline,
-            steps: [], // ORS provides detailed steps, need to parse them
+            steps: [], // LocationIQ provides detailed steps, need to parse them
             accidentCount: 0, // Placeholder
             shopCount: 0, // Placeholder
             publicDensity: 'Medium', // Placeholder
@@ -109,7 +106,7 @@ export const useDirections = (map: L.Map | null) => {
         }
         return { routes: [], status: 'NO_ROUTES_FOUND' };
       } catch (error) {
-        console.error('Error fetching ORS directions:', error);
+        console.error('Error fetching LocationIQ directions:', error);
         return { routes: [], status: `FETCH_ERROR: ${error}` };
       }
     },
@@ -170,7 +167,7 @@ export const useDirections = (map: L.Map | null) => {
           ...prev,
           currentPosition: position,
         }));
-      }, 500);
+      }, 100);
     } else {
       // Real GPS tracking
       if (navigator.geolocation) {

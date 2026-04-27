@@ -22,8 +22,10 @@ import { useAccidentZones } from '@/hooks/useAccidentZones';
 import { LatLng } from '@/types/map';
 import { Loader2 } from 'lucide-react';
 import { useLeafletMap } from '@/hooks/useLeafletMap';
+import { useToast } from '@/components/ui/use-toast';
 
 const Index = () => {
+  const { toast } = useToast();
   const [activeNav, setActiveNav] = useState<NavItem>('explore');
   const [showRadar, setShowRadar] = useState(false);
   const [showSafeShops, setShowSafeShops] = useState(true);

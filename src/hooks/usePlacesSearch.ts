@@ -1,9 +1,18 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+
+// Simple debounce utility
+const debounce = (func: Function, delay: number) => {
+  let timeout: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), delay);
+  };
+};
 import { LatLng } from '@/types/map';
 import L from 'leaflet';
 
 export interface PlacePrediction {
-  placeId: string; // Using Nominatim's osm_id as placeId
+  placeId: string; // Using ORS's gid as placeId
   description: string;
   mainText: string;
   secondaryText: string;
@@ -17,16 +26,16 @@ export interface PlaceDetails {
   position: LatLng;
   placeId: string;
   types: string[];
-  rating?: number; // Not directly available from Nominatim
-  isOpen?: boolean; // Not directly available from Nominatim
+  rating?: number; // Not directly available from ORS Geocoding
+  isOpen?: boolean; // Not directly available from ORS Geocoding
 }
 
-export const usePlacesSearch = (map: L.Map | null) => {
+export const usePlacesSearch = () => {
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [recentSearches, setRecentSearches] = useState<PlacePrediction[]>([]);
 
-  // Initialize services - no specific services needed for Nominatim beyond fetch
+  // Initialize services - no specific services needed for ORS Geocoding beyond fetch
   useEffect(() => {
     // Load recent searches from localStorage
     const saved = localStorage.getItem('recentSearches');
@@ -35,47 +44,60 @@ export const usePlacesSearch = (map: L.Map | null) => {
     }
   }, []);
 
-  // Search for places using Nominatim
-  const search = useCallback(async (query: string): Promise<void> => {
-    if (!query.trim()) {
-      setPredictions([]);
-      return;
-    }
-
-    setIsSearching(true);
-
-    try {
-      console.log(`Nominatim: Searching for query: "${query}"`);
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&countrycodes=in`
-      );
-      console.log('Nominatim: API response received.', response);
-      const results = await response.json();
-      console.log('Nominatim: Parsed JSON results.', results);
-
-      if (results && results.length > 0) {
-        setPredictions(
-          results.map((r: any) => ({
-            placeId: r.osm_id.toString(), // Using osm_id as a unique identifier
-            description: r.display_name,
-            mainText: r.name || r.address.road || r.display_name.split(',')[0],
-            secondaryText: r.display_name.split(',').slice(1).join(',').trim(),
-            lat: parseFloat(r.lat),
-            lng: parseFloat(r.lon),
-          }))
-        );
-      } else {
+  // Search for places using ORS Geocoding
+  const search = useCallback(
+    debounce(async (query: string): Promise<void> => {
+      if (!query.trim()) {
         setPredictions([]);
+        return;
       }
-      setIsSearching(false);
-    } catch (error) {
-      console.error('Nominatim search error:', error);
-      setPredictions([]);
-      setIsSearching(false);
-    }
-  }, []);
 
-  // Get place details - Nominatim search results are usually detailed enough
+      setIsSearching(true);
+
+      try {
+      const LOCATIONIQ_API_KEY = 'pk.ef423b51534f51549c9d54f6fbd88d65';
+        console.log(`LocationIQ: Searching for query: "${query}"`);
+        const response = await fetch(
+          `https://us1.locationiq.com/v1/search.php?key=${LOCATIONIQ_API_KEY}&q=${encodeURIComponent(query)}&format=json&limit=5`
+        );
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('LocationIQ API error:', response.status, errorText);
+          setPredictions([]);
+          setIsSearching(false);
+          return;
+        }
+
+        console.log('LocationIQ: API response received.', response);
+        const results = await response.json();
+        console.log('LocationIQ: Parsed JSON results.', results);
+
+        if (results && Array.isArray(results) && results.length > 0) {
+          setPredictions(
+            results.map((r: any) => ({
+              placeId: r.place_id,
+              description: r.display_name,
+              mainText: r.name || (r.address ? r.address.road : null) || r.display_name.split(',')[0],
+              secondaryText: r.display_name.split(',').slice(1).join(',').trim(),
+              lat: parseFloat(r.lat),
+              lng: parseFloat(r.lon),
+            }))
+          );
+        } else {
+          setPredictions([]);
+        }
+        setIsSearching(false);
+      } catch (error) {
+        console.error('ORS search error:', error);
+        setPredictions([]);
+        setIsSearching(false);
+      }
+    }, 300), // 300ms debounce delay
+    []
+  )
+
+  // Get place details - ORS Geocoding results are usually detailed enough
   const getPlaceDetails = useCallback(async (prediction: PlacePrediction): Promise<PlaceDetails | null> => {
     if (!prediction) return null;
 
@@ -84,7 +106,7 @@ export const usePlacesSearch = (map: L.Map | null) => {
       address: prediction.description,
       position: { lat: prediction.lat, lng: prediction.lng },
       placeId: prediction.placeId,
-      types: [], // Nominatim doesn't provide types in the same way as Google Places
+      types: [], // ORS Geocoding doesn't provide types in the same way as Google Places
     };
     return details;
   }, []);
@@ -109,13 +131,13 @@ export const usePlacesSearch = (map: L.Map | null) => {
     setPredictions([]);
   }, []);
 
-  // Search nearby places by type - Not directly supported by Nominatim in the same way
+  // Search nearby places by type - Not directly supported by ORS Geocoding in the same way
   const searchNearby = useCallback(async (
     position: LatLng,
     type: string,
     radius: number = 2000
   ): Promise<PlaceDetails[]> => {
-    console.warn('Nominatim does not support "searchNearby" by type directly. Returning empty array.');
+    console.warn('ORS Geocoding does not support "searchNearby" by type directly. Returning empty array.');
     return [];
   }, []);
 

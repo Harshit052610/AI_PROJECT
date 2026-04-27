@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PlacePrediction, usePlacesSearch } from "@/hooks/usePlacesSearch";
 import { PlaceSummary, TravelModeOption } from "@/components/map/PlaceDetailsSheet";
-import { toast } from "@/hooks/use-toast";
+import { useToast } from "@/components/ui/use-toast";
 
 const textSchema = z
   .string()
@@ -36,6 +36,7 @@ export const RoutePlannerDialog: React.FC<RoutePlannerDialogProps> = ({
   currentPosition,
   onPlanRoute,
 }) => {
+  const { toast } = useToast();
   const [originTab, setOriginTab] = useState<"current" | "manual">("current");
 
   const [originQuery, setOriginQuery] = useState("");

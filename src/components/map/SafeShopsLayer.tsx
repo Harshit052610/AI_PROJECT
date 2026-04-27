@@ -72,12 +72,12 @@ export const SafeShopsLayer: React.FC<SafeShopsLayerProps> = ({
       : [center];
 
     console.log(`📍 Searching around ${searchPoints.length} points.`);
-    console.warn('Note: searchNearby with Nominatim is not fully implemented yet, so shops may not appear.');
+    console.warn('Note: searchNearby with ORS Geocoding is not fully implemented yet, so shops may not appear.');
 
     for (const point of searchPoints) {
       for (const type of SHOP_TYPES) {
         try {
-          // searchNearby currently returns an empty array with Nominatim.
+          // searchNearby currently returns an empty array with ORS Geocoding.
           // This will need to be replaced with a proper nearby search implementation (e.g., Overpass API)
           const places = await searchNearby(point, type, 1500);
           console.log(`🔍 Found ${places.length} results for shop type: ${type}`);
