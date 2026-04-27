@@ -1,18 +1,18 @@
-/// <reference types="@types/google.maps" />
 import React, { useEffect, useRef } from 'react';
+import L from 'leaflet';
 import { RadarDevice, LatLng } from '@/types/map';
 import { useFirebaseRadar } from '@/hooks/useFirebaseRadar';
 
 interface RadarScannerProps {
-  map: google.maps.Map | null;
+  map: L.Map | null;
   isVisible: boolean;
   center: LatLng;
 }
 
 export const RadarScanner: React.FC<RadarScannerProps> = ({ map, isVisible, center }) => {
   const { devices, isConnected, isScanning } = useFirebaseRadar();
-  const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
-  const circleRef = useRef<google.maps.Circle | null>(null);
+  const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const circleRef = useRef<L.Circle | null>(null);
 
   // Update markers when devices change
   useEffect(() => {
@@ -20,13 +20,13 @@ export const RadarScanner: React.FC<RadarScannerProps> = ({ map, isVisible, cent
 
     // Always clear when not visible
     if (!isVisible) {
-      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
       return;
     }
 
     // Remove old markers
-    markersRef.current.forEach((marker) => marker.setMap(null));
+    markersRef.current.forEach((marker) => marker.remove());
     markersRef.current.clear();
 
     // Add new markers ONLY when we have real per-device GPS.
@@ -34,66 +34,66 @@ export const RadarScanner: React.FC<RadarScannerProps> = ({ map, isVisible, cent
     devices
       .filter((d) => d.position)
       .forEach((device) => {
-        const marker = new google.maps.Marker({
-          position: device.position!,
-          map,
-          label: {
-            text: '📱',
-            fontSize: '16px',
-          },
+        const marker = L.marker([device.position!.lat, device.position!.lng], {
+          icon: L.divIcon({
+            className: 'custom-div-icon',
+            html: '<div style="font-size: 16px;">📱</div>',
+            iconSize: [20, 20],
+            iconAnchor: [10, 10],
+          }),
           title: device.mac || device.id,
-          animation: device.status === 'sos' ? google.maps.Animation.BOUNCE : undefined,
-        });
+        }).addTo(map);
+
+        // Leaflet doesn't have direct animation like Google Maps BOUNCE.
+        // Custom animation would require CSS or a plugin.
 
         const vendor = device.vendor || device.name || 'Unknown Vendor';
         const mac = device.mac || device.id;
         const rssi = typeof device.rssi === 'number' ? `${device.rssi} dBm` : '—';
         const dist = typeof device.distance === 'number' ? `${device.distance} m` : '—';
 
-        const infoWindow = new google.maps.InfoWindow({
-          content: `
+        const popupContent = `
             <div style="padding: 8px; font-family: 'Inter', sans-serif;">
               <div style="font-weight: 600; font-size: 14px; color: #3d3429;">${vendor}</div>
               <div style="font-size: 12px; color: #8B7355; margin-top: 4px;">MAC: <span style="font-weight: 500;">${mac}</span></div>
               <div style="font-size: 12px; color: #8B7355; margin-top: 4px;">Signal: <span style="font-weight: 500;">${rssi}</span></div>
               <div style="font-size: 12px; color: #8B7355; margin-top: 4px;">Distance (estimate): <span style="font-weight: 500;">${dist}</span></div>
             </div>
-          `,
-        });
+          `;
 
-        marker.addListener('click', () => {
-          infoWindow.open(map, marker);
+        marker.bindPopup(popupContent);
+
+        marker.on('click', () => {
+          marker.openPopup();
         });
 
         markersRef.current.set(device.id, marker);
       });
 
     return () => {
-      markersRef.current.forEach((marker) => marker.setMap(null));
+      markersRef.current.forEach((marker) => marker.remove());
       markersRef.current.clear();
     };
-  }, [map, devices, isVisible, center]);
+  }, [map, devices, isVisible]);
 
   // Radar circle animation
   useEffect(() => {
     if (!map || !isVisible) {
-      circleRef.current?.setMap(null);
+      circleRef.current?.remove();
+      circleRef.current = null;
       return;
     }
 
-    circleRef.current = new google.maps.Circle({
-      strokeColor: '#8B7355',
-      strokeOpacity: 0.8,
-      strokeWeight: 2,
+    circleRef.current = L.circle([center.lat, center.lng], {
+      color: '#8B7355',
       fillColor: '#8B7355',
       fillOpacity: 0.1,
-      map,
-      center,
-      radius: 2000,
-    });
+      radius: 2000, // Radius in meters
+    }).addTo(map);
 
     return () => {
-      circleRef.current?.setMap(null);
+      circleRef.current?.remove();
+      circleRef.current = null;
     };
   }, [map, isVisible, center]);
 

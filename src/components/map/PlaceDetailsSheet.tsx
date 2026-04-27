@@ -2,57 +2,47 @@ import React, { useEffect, useMemo, useState } from "react";
 import { X, Star, Phone, Globe, MapPin, Navigation2, Footprints, Bike, Car } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { usePlaceDetails, PlaceDetailsExtended } from "@/hooks/usePlaceDetails";
+import { PlacePrediction } from "@/hooks/usePlacesSearch"; // Import PlacePrediction
 
 export type TravelModeOption = "WALKING" | "BICYCLING" | "DRIVING";
 
-export interface PlaceSummary {
-  placeId: string;
-  name: string;
-  address?: string;
-  rating?: number;
-  isOpen?: boolean;
-  location: { lat: number; lng: number };
-}
-
 interface PlaceDetailsSheetProps {
-  map: google.maps.Map | null;
-  place: PlaceSummary | null;
+  place: PlacePrediction | null;
   isOpen: boolean;
   onClose: () => void;
   onStartDirections: (travelMode: TravelModeOption) => void;
 }
 
 export const PlaceDetailsSheet: React.FC<PlaceDetailsSheetProps> = ({
-  map,
   place,
   isOpen,
   onClose,
   onStartDirections,
 }) => {
-  const { fetchPlaceDetails, isLoading } = usePlaceDetails(map);
+  const { fetchPlaceDetails, isLoading } = usePlaceDetails();
   const [details, setDetails] = useState<PlaceDetailsExtended | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    if (!isOpen || !place?.placeId) return;
+    if (!isOpen || !place) return;
 
     (async () => {
-      const d = await fetchPlaceDetails(place.placeId);
+      const d = await fetchPlaceDetails(place);
       if (mounted) setDetails(d);
     })();
 
     return () => {
       mounted = false;
     };
-  }, [isOpen, place?.placeId, fetchPlaceDetails]);
+  }, [isOpen, place, fetchPlaceDetails]);
 
-  const title = details?.name || place?.name || "";
-  const address = details?.address || place?.address || "";
+  const title = details?.name || place?.mainText || "";
+  const address = details?.address || place?.description || "";
 
+  // Photos are not available from Nominatim
   const photos = useMemo(() => {
-    if (details?.photos?.length) return details.photos;
     return [];
-  }, [details]);
+  }, []);
 
   if (!isOpen || !place) return null;
 
@@ -62,20 +52,7 @@ export const PlaceDetailsSheet: React.FC<PlaceDetailsSheetProps> = ({
         <div className="min-w-0">
           <div className="font-serif font-semibold truncate">{title}</div>
           <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-            {typeof details?.rating === "number" || typeof place.rating === "number" ? (
-              <span className="inline-flex items-center gap-1">
-                <Star className="w-3.5 h-3.5 text-warning fill-warning" />
-                <span>{(details?.rating ?? place.rating)?.toFixed(1)}</span>
-                {details?.userRatingsTotal ? (
-                  <span className="text-muted-foreground">({details.userRatingsTotal})</span>
-                ) : null}
-              </span>
-            ) : null}
-            {details?.isOpen !== undefined || place.isOpen !== undefined ? (
-              <span className={details?.isOpen ?? place.isOpen ? "text-success" : "text-destructive"}>
-                {(details?.isOpen ?? place.isOpen) ? "Open" : "Closed"}
-              </span>
-            ) : null}
+            {/* Rating and Open status are not directly available from Nominatim */}
           </div>
         </div>
         <button onClick={onClose} className="p-1 hover:bg-secondary rounded-full transition-colors">
@@ -173,17 +150,6 @@ export const PlaceDetailsSheet: React.FC<PlaceDetailsSheetProps> = ({
             <span>Routes + ETA will appear in the Commute panel.</span>
           </div>
         </div>
-
-        {details?.googleMapsUrl && (
-          <a
-            href={details.googleMapsUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Open in Google Maps
-          </a>
-        )}
       </div>
     </div>
   );

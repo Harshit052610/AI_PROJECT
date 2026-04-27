@@ -1,12 +1,14 @@
-/// <reference types="@types/google.maps" />
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { LatLng } from '@/types/map';
+import L from 'leaflet';
 
 export interface PlacePrediction {
-  placeId: string;
+  placeId: string; // Using Nominatim's osm_id as placeId
   description: string;
   mainText: string;
   secondaryText: string;
+  lat: number;
+  lng: number;
 }
 
 export interface PlaceDetails {
@@ -15,26 +17,17 @@ export interface PlaceDetails {
   position: LatLng;
   placeId: string;
   types: string[];
-  rating?: number;
-  isOpen?: boolean;
+  rating?: number; // Not directly available from Nominatim
+  isOpen?: boolean; // Not directly available from Nominatim
 }
 
-export const usePlacesSearch = (map: google.maps.Map | null) => {
+export const usePlacesSearch = (map: L.Map | null) => {
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [recentSearches, setRecentSearches] = useState<PlacePrediction[]>([]);
 
-  const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
-  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
-  const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
-
-  // Initialize services
+  // Initialize services - no specific services needed for Nominatim beyond fetch
   useEffect(() => {
-    if (!window.google?.maps?.places) return;
-
-    autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
-    sessionTokenRef.current = new google.maps.places.AutocompleteSessionToken();
-
     // Load recent searches from localStorage
     const saved = localStorage.getItem('recentSearches');
     if (saved) {
@@ -42,14 +35,9 @@ export const usePlacesSearch = (map: google.maps.Map | null) => {
     }
   }, []);
 
-  useEffect(() => {
-    if (!map || !window.google?.maps?.places) return;
-    placesServiceRef.current = new google.maps.places.PlacesService(map);
-  }, [map]);
-
-  // Search for places
+  // Search for places using Nominatim
   const search = useCallback(async (query: string): Promise<void> => {
-    if (!query.trim() || !autocompleteServiceRef.current) {
+    if (!query.trim()) {
       setPredictions([]);
       return;
     }
@@ -57,75 +45,53 @@ export const usePlacesSearch = (map: google.maps.Map | null) => {
     setIsSearching(true);
 
     try {
-      autocompleteServiceRef.current.getPlacePredictions(
-        {
-          input: query,
-          sessionToken: sessionTokenRef.current!,
-          componentRestrictions: { country: 'in' },
-        },
-        (results, status) => {
-          if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-            setPredictions(
-              results.map((r) => ({
-                placeId: r.place_id,
-                description: r.description,
-                mainText: r.structured_formatting.main_text,
-                secondaryText: r.structured_formatting.secondary_text || '',
-              }))
-            );
-          } else {
-            setPredictions([]);
-          }
-          setIsSearching(false);
-        }
+      console.log(`Nominatim: Searching for query: "${query}"`);
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&countrycodes=in`
       );
+      console.log('Nominatim: API response received.', response);
+      const results = await response.json();
+      console.log('Nominatim: Parsed JSON results.', results);
+
+      if (results && results.length > 0) {
+        setPredictions(
+          results.map((r: any) => ({
+            placeId: r.osm_id.toString(), // Using osm_id as a unique identifier
+            description: r.display_name,
+            mainText: r.name || r.address.road || r.display_name.split(',')[0],
+            secondaryText: r.display_name.split(',').slice(1).join(',').trim(),
+            lat: parseFloat(r.lat),
+            lng: parseFloat(r.lon),
+          }))
+        );
+      } else {
+        setPredictions([]);
+      }
+      setIsSearching(false);
     } catch (error) {
-      console.error('Search error:', error);
+      console.error('Nominatim search error:', error);
       setPredictions([]);
       setIsSearching(false);
     }
   }, []);
 
-  // Get place details
-  const getPlaceDetails = useCallback(async (placeId: string): Promise<PlaceDetails | null> => {
-    if (!placesServiceRef.current) return null;
+  // Get place details - Nominatim search results are usually detailed enough
+  const getPlaceDetails = useCallback(async (prediction: PlacePrediction): Promise<PlaceDetails | null> => {
+    if (!prediction) return null;
 
-    return new Promise((resolve) => {
-      placesServiceRef.current!.getDetails(
-        {
-          placeId,
-          fields: ['name', 'formatted_address', 'geometry', 'types', 'rating', 'opening_hours'],
-          sessionToken: sessionTokenRef.current!,
-        },
-        (place, status) => {
-          // Generate new session token after fetching details
-          sessionTokenRef.current = new google.maps.places.AutocompleteSessionToken();
-
-          if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry?.location) {
-            const details: PlaceDetails = {
-              name: place.name || '',
-              address: place.formatted_address || '',
-              position: {
-                lat: place.geometry.location.lat(),
-                lng: place.geometry.location.lng(),
-              },
-              placeId,
-              types: place.types || [],
-              rating: place.rating,
-              isOpen: place.opening_hours?.isOpen?.(),
-            };
-            resolve(details);
-          } else {
-            resolve(null);
-          }
-        }
-      );
-    });
+    const details: PlaceDetails = {
+      name: prediction.mainText,
+      address: prediction.description,
+      position: { lat: prediction.lat, lng: prediction.lng },
+      placeId: prediction.placeId,
+      types: [], // Nominatim doesn't provide types in the same way as Google Places
+    };
+    return details;
   }, []);
 
   // Select a prediction
   const selectPrediction = useCallback(async (prediction: PlacePrediction) => {
-    const details = await getPlaceDetails(prediction.placeId);
+    const details = await getPlaceDetails(prediction);
     
     // Save to recent searches
     setRecentSearches((prev) => {
@@ -143,44 +109,14 @@ export const usePlacesSearch = (map: google.maps.Map | null) => {
     setPredictions([]);
   }, []);
 
-  // Search nearby places by type
+  // Search nearby places by type - Not directly supported by Nominatim in the same way
   const searchNearby = useCallback(async (
     position: LatLng,
     type: string,
     radius: number = 2000
   ): Promise<PlaceDetails[]> => {
-    if (!placesServiceRef.current) return [];
-
-    return new Promise((resolve) => {
-      placesServiceRef.current!.nearbySearch(
-        {
-          location: new google.maps.LatLng(position.lat, position.lng),
-          radius,
-          type,
-        },
-        (results, status) => {
-          if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-            const places: PlaceDetails[] = results
-              .filter((r) => r.geometry?.location)
-              .map((r) => ({
-                name: r.name || '',
-                address: r.vicinity || '',
-                position: {
-                  lat: r.geometry!.location!.lat(),
-                  lng: r.geometry!.location!.lng(),
-                },
-                placeId: r.place_id || '',
-                types: r.types || [],
-                rating: r.rating,
-                isOpen: r.opening_hours?.isOpen?.(),
-              }));
-            resolve(places);
-          } else {
-            resolve([]);
-          }
-        }
-      );
-    });
+    console.warn('Nominatim does not support "searchNearby" by type directly. Returning empty array.');
+    return [];
   }, []);
 
   return {

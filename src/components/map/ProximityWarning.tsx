@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
+import L from 'leaflet';
 import { AccidentZone } from '@/hooks/useAccidentZones';
 import { LatLng } from '@/types/map';
 
 interface ProximityWarningProps {
-    map: google.maps.Map | null;
+    map: L.Map | null;
     currentPosition: LatLng | null;
     zones: AccidentZone[];
 }
@@ -11,9 +12,8 @@ interface ProximityWarningProps {
 export const ProximityWarning: React.FC<ProximityWarningProps> = ({ map, currentPosition, zones }) => {
     const [warning, setWarning] = useState<{ distance: number, zone: AccidentZone } | null>(null);
     const [isExpanded, setIsExpanded] = useState(false);
-    const markerRef = useRef<google.maps.Marker | null>(null);
-    const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
-    const markerListenersRef = useRef<google.maps.MapsEventListener[]>([]);
+    const markerRef = useRef<L.Marker | null>(null);
+    const popupRef = useRef<L.Popup | null>(null);
 
     useEffect(() => {
         if (!map || !currentPosition) return;
@@ -21,11 +21,11 @@ export const ProximityWarning: React.FC<ProximityWarningProps> = ({ map, current
         let closestDistance = Infinity;
         let closestZone: AccidentZone | null = null;
 
-        const userLatLng = new google.maps.LatLng(currentPosition.lat, currentPosition.lng);
+        const userLatLng = L.latLng(currentPosition.lat, currentPosition.lng);
 
         for (const zone of zones) {
-            const zoneLatLng = new google.maps.LatLng(zone.lat, zone.lng);
-            const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, zoneLatLng);
+            const zoneLatLng = L.latLng(zone.lat, zone.lng);
+            const distance = userLatLng.distanceTo(zoneLatLng); // Leaflet's distance calculation
 
             if (distance < closestDistance) {
                 closestDistance = distance;
@@ -38,25 +38,34 @@ export const ProximityWarning: React.FC<ProximityWarningProps> = ({ map, current
 
             if (!markerRef.current) {
                 const isBlackspot = closestZone.point_type === 'blackspot';
-                markerRef.current = new google.maps.Marker({
-                    position: { lat: closestZone.lat, lng: closestZone.lng },
-                    map,
-                    icon: {
-                        path: google.maps.SymbolPath.CIRCLE,
-                        scale: 14,
-                        fillColor: isBlackspot ? '#ef4444' : '#991b1b',
-                        fillOpacity: 0.9,
-                        strokeColor: '#fff',
-                        strokeWeight: 2,
-                    },
-                    animation: google.maps.Animation.BOUNCE,
+                const iconHtml = `<div style="
+                    width: 28px; height: 28px; border-radius: 50%;
+                    background-color: ${isBlackspot ? '#ef4444' : '#991b1b'};
+                    border: 2px solid #fff;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+                    display: flex; align-items: center; justify-content: center;
+                    font-size: 18px; color: white;
+                ">🚨</div>`;
+
+                markerRef.current = L.marker([closestZone.lat, closestZone.lng], {
+                    icon: L.divIcon({
+                        className: 'proximity-warning-icon',
+                        html: iconHtml,
+                        iconSize: [28, 28],
+                        iconAnchor: [14, 14],
+                    }),
+                }).addTo(map);
+
+                // Leaflet doesn't have direct animation like Google Maps BOUNCE.
+                // Custom animation would require CSS or a plugin.
+
+                popupRef.current = L.popup({
+                    closeButton: false,
+                    autoPan: false,
+                    offset: L.point(0, -20), // Adjust offset to be above the marker
                 });
 
-                infoWindowRef.current = new google.maps.InfoWindow({
-                    disableAutoPan: true,
-                });
-
-                const mOver = markerRef.current.addListener('mouseover', () => {
+                const mOver = () => {
                     if (!closestZone) return;
                     const isB = closestZone.point_type === 'blackspot';
                     const contentString = `
@@ -71,41 +80,39 @@ export const ProximityWarning: React.FC<ProximityWarningProps> = ({ map, current
                             </div>
                         </div>
                     `;
-                    if (infoWindowRef.current && markerRef.current && map) {
-                        infoWindowRef.current.setContent(contentString);
-                        infoWindowRef.current.open(map, markerRef.current);
+                    if (popupRef.current && markerRef.current && map) {
+                        popupRef.current.setLatLng(markerRef.current.getLatLng()).setContent(contentString).openOn(map);
                     }
-                });
+                };
 
-                const mOut = markerRef.current.addListener('mouseout', () => {
-                    infoWindowRef.current?.close();
-                });
+                const mOut = () => {
+                    popupRef.current?.remove();
+                };
 
-                markerListenersRef.current = [mOver, mOut];
+                markerRef.current.on('mouseover', mOver);
+                markerRef.current.on('mouseout', mOut);
+
             } else {
-                markerRef.current.setPosition({ lat: closestZone.lat, lng: closestZone.lng });
+                markerRef.current.setLatLng([closestZone.lat, closestZone.lng]);
             }
         } else {
             setWarning(null);
             setIsExpanded(false);
             if (markerRef.current) {
-                markerRef.current.setMap(null);
+                markerRef.current.remove();
                 markerRef.current = null;
             }
-            if (infoWindowRef.current) {
-                infoWindowRef.current.close();
-                infoWindowRef.current = null;
+            if (popupRef.current) {
+                popupRef.current.remove();
+                popupRef.current = null;
             }
-            markerListenersRef.current.forEach(l => google.maps.event.removeListener(l));
-            markerListenersRef.current = [];
         }
     }, [map, currentPosition, zones]);
 
     useEffect(() => {
         return () => {
-            if (markerRef.current) markerRef.current.setMap(null);
-            if (infoWindowRef.current) infoWindowRef.current.close();
-            markerListenersRef.current.forEach(l => google.maps.event.removeListener(l));
+            markerRef.current?.remove();
+            popupRef.current?.remove();
         }
     }, []);
 

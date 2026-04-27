@@ -1,6 +1,4 @@
-/// <reference types="@types/google.maps" />
-import React, { useState, useCallback, useEffect } from 'react';
-import { useGoogleMaps } from '@/hooks/useGoogleMaps';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useDirections } from '@/hooks/useDirections';
 import { useFirebaseRadar } from '@/hooks/useFirebaseRadar';
 import { SearchBar } from '@/components/map/SearchBar';
@@ -15,16 +13,15 @@ import { ExplorePanel } from '@/components/map/ExplorePanel';
 import { MeasurementTool } from '@/components/map/MeasurementTool';
 import { WeatherLayer } from '@/components/map/WeatherLayer';
 import { SideMenu } from '@/components/map/SideMenu';
-import { PlaceDetailsSheet, PlaceSummary, TravelModeOption } from '@/components/map/PlaceDetailsSheet';
+import { PlaceDetailsSheet, TravelModeOption } from '@/components/map/PlaceDetailsSheet';
+import { PlacePrediction } from '@/hooks/usePlacesSearch';
 import { RoutePlannerDialog } from '@/components/map/RoutePlannerDialog';
 import { ProximityWarning } from '@/components/map/ProximityWarning';
 import { AccidentDotsLayer } from '@/components/map/AccidentDotsLayer';
 import { useAccidentZones } from '@/hooks/useAccidentZones';
 import { LatLng } from '@/types/map';
 import { Loader2 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
-
-type NavItem = 'explore' | 'commute' | 'contribute' | 'updates';
+import { useLeafletMap } from '@/hooks/useLeafletMap';
 
 const Index = () => {
   const [activeNav, setActiveNav] = useState<NavItem>('explore');
@@ -36,13 +33,14 @@ const Index = () => {
   const [showWeather, setShowWeather] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [currentPosition, setCurrentPosition] = useState<LatLng | null>(null);
-  const [selectedPlace, setSelectedPlace] = useState<PlaceSummary | null>(null);
+  const [selectedPlace, setSelectedPlace] = useState<PlacePrediction | null>(null);
   const [showPlaceDetails, setShowPlaceDetails] = useState(false);
   const [showRoutePlanner, setShowRoutePlanner] = useState(false);
   const [showAccidentDots, setShowAccidentDots] = useState(true);
 
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+
   const {
-    isLoaded,
     map,
     mapState,
     setMapType,
@@ -52,7 +50,7 @@ const Index = () => {
     zoomOut,
     getCurrentLocation,
     openStreetView,
-  } = useGoogleMaps('map-container');
+  } = useLeafletMap(mapContainerRef);
 
   const {
     navigationState,
@@ -87,22 +85,16 @@ const Index = () => {
 
   // Handle place selection
   const handlePlaceSelect = useCallback(
-    async (place: PlaceSummary) => {
+    async (place: PlacePrediction) => {
       if (!map) return;
 
       setSelectedPlace(place);
       setShowPlaceDetails(true);
 
-      map.panTo(place.location);
+      map.panTo([place.lat, place.lng]);
       map.setZoom(17);
 
-      // Add marker
-      new google.maps.Marker({
-        position: place.location,
-        map,
-        animation: google.maps.Animation.DROP,
-        title: place.name,
-      });
+      // Add marker (will be handled by a Leaflet-specific component later)
 
       // Open commute panel (even before routes, it will show helper text)
       setShowDirections(true);
@@ -111,14 +103,14 @@ const Index = () => {
       if (currentPosition) {
         const res = await getDirections(
           currentPosition,
-          place.location,
-          google.maps.TravelMode.DRIVING,
+          { lat: place.lat, lng: place.lng },
+          'DRIVING',
           zones // pass accident zones for safety checking
         );
         if (res.routes.length > 0) {
           toast({
             title: 'Routes Found',
-            description: `Found ${res.routes.length} route${res.routes.length > 1 ? 's' : ''} to ${place.name}`,
+            description: `Found ${res.routes.length} route${res.routes.length > 1 ? 's' : ''} to ${place.mainText}`,
           });
         } else if (res.status) {
           toast({
@@ -164,11 +156,11 @@ const Index = () => {
     if (center && navigator.share) {
       navigator.share({
         title: 'Check out this location',
-        url: `https://www.google.com/maps?q=${center.lat()},${center.lng()}`,
+        url: `https://www.google.com/maps?q=${center.lat},${center.lng}`,
       });
     } else if (center) {
       navigator.clipboard.writeText(
-        `https://www.google.com/maps?q=${center.lat()},${center.lng()}`
+        `https://www.google.com/maps?q=${center.lat},${center.lng}`
       );
       toast({ title: 'Link copied to clipboard!' });
     }
@@ -176,11 +168,11 @@ const Index = () => {
 
   // Handle Street View
   const handleStreetView = useCallback(() => {
-    const center = map?.getCenter();
-    if (center) {
-      openStreetView({ lat: center.lat(), lng: center.lng() });
-    }
-  }, [map, openStreetView]);
+    toast({
+      title: 'Street View Unavailable',
+      description: 'Street View is not available with OpenStreetMap/Leaflet.',
+    });
+  }, []);
 
   // Handle SOS
   const handleSOS = useCallback(() => {
@@ -192,22 +184,10 @@ const Index = () => {
     });
   }, [triggerSOS]);
 
-  if (!isLoaded) {
-    return (
-      <div className="h-screen w-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-          <h2 className="font-serif text-xl font-semibold">Loading SafeWalk</h2>
-          <p className="text-sm text-muted-foreground mt-2">Preparing your safe journey...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-screen w-screen relative overflow-hidden">
       {/* Map Container */}
-      <div id="map-container" className="h-full w-full" />
+      <div ref={mapContainerRef} id="map-container" className="h-full w-full z-0" />
 
       {/* Search Bar */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 w-[90%] max-w-2xl z-20">
@@ -228,7 +208,6 @@ const Index = () => {
         onToggle3D={toggle3D}
         onMapTypeChange={setMapType}
         onLayerToggle={toggleLayer}
-        onStreetView={handleStreetView}
         onMeasure={() => setShowMeasure((prev) => !prev)}
         onShare={handleShare}
         showAccidentDots={showAccidentDots}
@@ -294,7 +273,6 @@ const Index = () => {
 
       {/* Place Details */}
       <PlaceDetailsSheet
-        map={map}
         place={selectedPlace}
         isOpen={showPlaceDetails}
         onClose={() => setShowPlaceDetails(false)}
@@ -305,25 +283,25 @@ const Index = () => {
           }
           const travelMode =
             mode === 'WALKING'
-              ? google.maps.TravelMode.WALKING
+              ? 'WALKING'
               : mode === 'BICYCLING'
-                ? google.maps.TravelMode.BICYCLING
-                : google.maps.TravelMode.DRIVING;
+                ? 'BICYCLING'
+                : 'DRIVING';
 
           const primary = await getDirections(
             currentPosition,
-            selectedPlace.location,
+            { lat: selectedPlace.lat, lng: selectedPlace.lng },
             travelMode,
             zones
           );
           setShowDirections(true);
 
           // If WALKING/BICYCLING returns no routes (very common coverage issue), fallback to DRIVING so you always get a path.
-          if (primary.routes.length === 0 && travelMode !== google.maps.TravelMode.DRIVING) {
+          if (primary.routes.length === 0 && travelMode !== 'DRIVING') {
             const fallback = await getDirections(
               currentPosition,
-              selectedPlace.location,
-              google.maps.TravelMode.DRIVING,
+              { lat: selectedPlace.lat, lng: selectedPlace.lng },
+              'DRIVING',
               zones
             );
 
@@ -465,16 +443,16 @@ const Index = () => {
         onPlanRoute={async ({ origin, destination, mode }) => {
           const travelMode =
             mode === 'WALKING'
-              ? google.maps.TravelMode.WALKING
+              ? 'WALKING'
               : mode === 'BICYCLING'
-                ? google.maps.TravelMode.BICYCLING
-                : google.maps.TravelMode.DRIVING;
+                ? 'BICYCLING'
+                : 'DRIVING';
 
           const primary = await getDirections(origin, destination, travelMode, zones);
           setShowDirections(true);
 
-          if (primary.routes.length === 0 && travelMode !== google.maps.TravelMode.DRIVING) {
-            const fallback = await getDirections(origin, destination, google.maps.TravelMode.DRIVING);
+          if (primary.routes.length === 0 && travelMode !== 'DRIVING') {
+            const fallback = await getDirections(origin, destination, 'DRIVING');
             if (fallback.routes.length > 0) {
               toast({ title: 'Route fallback', description: 'Walk/Bike routes unavailable here. Showing car route instead.' });
               startNavigation('simulate');

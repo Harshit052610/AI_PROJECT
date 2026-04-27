@@ -1,9 +1,9 @@
-/// <reference types="@types/google.maps" />
 import { useState, useCallback, useRef, useEffect } from 'react';
+import L from 'leaflet';
 import { LatLng, RouteInfo, NavigationState } from '@/types/map';
 
-export const useDirections = (map: google.maps.Map | null) => {
-  const waitForGoogleRef = useRef<Promise<boolean> | null>(null);
+export const useDirections = (map: L.Map | null) => {
+  const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImM4ZTNiZTBhYTNkYzRmMzJiNDVhMWQ4NjljYThkYjE5IiwiaCI6Im11cm11cjY0In0='; // Replace with your ORS API key
 
   const [navigationState, setNavigationState] = useState<NavigationState>({
     isNavigating: false,
@@ -14,191 +14,118 @@ export const useDirections = (map: google.maps.Map | null) => {
     selectedRoute: 0,
   });
 
-  const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
-  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
   const simulationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const routeIndexRef = useRef(0);
-  const currentMarkerRef = useRef<google.maps.Marker | null>(null);
+  const currentMarkerRef = useRef<L.Marker | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const routePolylineRef = useRef<L.Polyline | null>(null); // To store the drawn route
 
-  // Initialize services (DirectionsService can be created lazily as soon as Google Maps is ready)
-  useEffect(() => {
-    if (!window.google?.maps) return;
-    if (!directionsServiceRef.current) {
-      directionsServiceRef.current = new google.maps.DirectionsService();
-    }
-  }, [map]);
-
-  useEffect(() => {
-    if (!map) return;
-
-    directionsRendererRef.current = new google.maps.DirectionsRenderer({
-      map,
-      suppressMarkers: false,
-      polylineOptions: {
-        // Google-like blue
-        strokeColor: '#1A73E8',
-        strokeWeight: 5,
-        strokeOpacity: 0.85,
-      },
-    });
-
-    return () => {
-      directionsRendererRef.current?.setMap(null);
-    };
-  }, [map]);
-
-  const waitForGoogle = useCallback(async () => {
-    if (window.google?.maps) return true;
-
-    if (!waitForGoogleRef.current) {
-      waitForGoogleRef.current = new Promise<boolean>((resolve) => {
-        const start = Date.now();
-        const interval = setInterval(() => {
-          if (window.google?.maps) {
-            clearInterval(interval);
-            resolve(true);
-            return;
-          }
-          if (Date.now() - start > 8000) {
-            clearInterval(interval);
-            resolve(false);
-          }
-        }, 100);
-      });
-    }
-
-    return await waitForGoogleRef.current;
-  }, []);
-
-  // Get directions
+  // Get directions - Placeholder for Leaflet routing
   const getDirections = useCallback(
     async (
       origin: LatLng,
       destination: LatLng,
-      travelMode: google.maps.TravelMode = google.maps.TravelMode.DRIVING,
+      travelMode: string = 'DRIVING', // travelMode is now a string
       accidentZones: any[] = [],
       safeShops: any[] = []
     ): Promise<{ routes: RouteInfo[]; status?: string }> => {
-      const ready = await waitForGoogle();
-      if (!ready) return { routes: [], status: 'MAPS_SCRIPT_NOT_LOADED' };
-
-      if (!directionsServiceRef.current) {
-        directionsServiceRef.current = new google.maps.DirectionsService();
+      if (!ORS_API_KEY || ORS_API_KEY === 'YOUR_OPENROUTESERVICE_API_KEY') {
+        console.error('OpenRouteService API key is not set.');
+        return { routes: [], status: 'API_KEY_MISSING' };
       }
 
-      if (!directionsServiceRef.current) {
-        return { routes: [], status: 'SERVICE_NOT_READY' };
-      }
+      const profile = travelMode.toLowerCase(); // ORS profiles are lowercase (e.g., 'driving-car')
+      const coordinates = `${origin.lng},${origin.lat}|${destination.lng},${destination.lat}`;
+      const apiUrl = `https://api.openrouteservice.org/v2/directions/${profile}/geojson`;
 
-      return new Promise((resolve) => {
-        const baseRequest: google.maps.DirectionsRequest = {
-          origin: new google.maps.LatLng(origin.lat, origin.lng),
-          destination: new google.maps.LatLng(destination.lat, destination.lng),
-          travelMode,
-          provideRouteAlternatives: true,
-        };
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json, application/geo+json, application/gpx+xml, application/x-protobuf',
+            'Content-Type': 'application/json',
+            'Authorization': ORS_API_KEY,
+          },
+          body: JSON.stringify({
+            coordinates: [[origin.lng, origin.lat], [destination.lng, destination.lat]],
+          }),
+        });
 
-        // drivingOptions are only valid for DRIVING
-        const request: google.maps.DirectionsRequest =
-          travelMode === google.maps.TravelMode.DRIVING
-            ? {
-              ...baseRequest,
-              drivingOptions: {
-                departureTime: new Date(),
-                trafficModel: google.maps.TrafficModel.BEST_GUESS,
-              },
-            }
-            : baseRequest;
+        if (!response.ok) {
+          const errorBody = await response.json();
+          console.error('ORS API error:', errorBody);
+          return { routes: [], status: `ORS_ERROR: ${errorBody.error.message}` };
+        }
 
-        directionsServiceRef.current!.route(request, (result, status) => {
-          if (status === google.maps.DirectionsStatus.OK && result) {
-            directionsRendererRef.current?.setDirections(result);
+        const data = await response.json();
+        if (data.features && data.features.length > 0) {
+          const routeFeature = data.features[0];
+          const routeCoordinates = routeFeature.geometry.coordinates.map((coord: [number, number]) => ({
+            lng: coord[0],
+            lat: coord[1],
+          }));
 
-            const routes: RouteInfo[] = result.routes.map((route, index) => {
-              const leg = route.legs[0];
-              const polyline = route.overview_path;
+          // Convert ORS polyline to Leaflet LatLng array
+          const leafletPolyline: LatLng[] = routeCoordinates.map((coord: LatLng) => ({
+            lat: coord.lat,
+            lng: coord.lng,
+          }));
 
-              // Calculate accidents along route (within 100m of polyline)
-              let accidentsOnRoute = 0;
-              accidentZones.forEach(zone => {
-                const zoneLatLng = new google.maps.LatLng(zone.lat, zone.lng);
-                const isNear = polyline.some(point =>
-                  google.maps.geometry.spherical.computeDistanceBetween(point, zoneLatLng) < 100
-                );
-                if (isNear) accidentsOnRoute++;
-              });
+          // Dummy values for now, will refine later
+          const distance = (routeFeature.properties.summary.distance / 1000).toFixed(1) + ' km';
+          const duration = Math.round(routeFeature.properties.summary.duration / 60) + ' min';
 
-              // Calculate shops along route (within 200m)
-              let shopsOnRoute = 0;
-              safeShops.forEach(shop => {
-                const shopLatLng = new google.maps.LatLng(shop.position.lat, shop.position.lng);
-                const isNear = polyline.some(point =>
-                  google.maps.geometry.spherical.computeDistanceBetween(point, shopLatLng) < 200
-                );
-                if (isNear) shopsOnRoute++;
-              });
-
-              return {
-                id: `route-${index}`,
-                distance: leg.distance?.text || '',
-                duration: leg.duration?.text || '',
-                safetyScore: Math.max(0, 100 - (accidentsOnRoute * 15)),
-                polyline: polyline,
-                steps: leg.steps.map((step) => ({
-                  instruction: step.instructions,
-                  distance: step.distance?.text || '',
-                  duration: step.duration?.text || '',
-                })),
-                accidentCount: accidentsOnRoute,
-                shopCount: shopsOnRoute,
-                publicDensity: shopsOnRoute > 5 ? 'High' : shopsOnRoute > 2 ? 'Medium' : 'Low',
-                isFastest: index === 0, // Usually the first route is fastest in Google Maps
-              };
-            });
-
-            setNavigationState((prev) => ({
-              ...prev,
-              routes,
-              destination,
-              selectedRoute: 0,
-              lastDirectionsStatus: undefined,
-            }));
-
-            resolve({ routes });
-            return;
-          }
-
-          console.error('Directions error:', status, result);
-          directionsRendererRef.current?.setDirections({ routes: [] } as any);
+          const routes: RouteInfo[] = [{
+            id: 'ors-route-1',
+            distance: distance,
+            duration: duration,
+            safetyScore: 80, // Placeholder
+            polyline: leafletPolyline,
+            steps: [], // ORS provides detailed steps, need to parse them
+            accidentCount: 0, // Placeholder
+            shopCount: 0, // Placeholder
+            publicDensity: 'Medium', // Placeholder
+            isFastest: true,
+          }];
 
           setNavigationState((prev) => ({
             ...prev,
-            routes: [],
+            routes,
             destination,
             selectedRoute: 0,
-            lastDirectionsStatus: String(status),
+            lastDirectionsStatus: undefined,
           }));
 
-          resolve({ routes: [], status: String(status) });
-        });
-      });
-    },
-    [waitForGoogle]
-  );
+          // Draw polyline on map
+          if (map) {
+            if (routePolylineRef.current) {
+              map.removeLayer(routePolylineRef.current);
+            }
+            routePolylineRef.current = L.polyline(leafletPolyline.map(p => [p.lat, p.lng]), { color: '#1A73E8', weight: 5, opacity: 0.85 }).addTo(map);
+            map.fitBounds(routePolylineRef.current.getBounds());
+          }
 
+          return { routes };
+        }
+        return { routes: [], status: 'NO_ROUTES_FOUND' };
+      } catch (error) {
+        console.error('Error fetching ORS directions:', error);
+        return { routes: [], status: `FETCH_ERROR: ${error}` };
+      }
+    },
+    [map]
+  );
 
   // Select a route
   const selectRoute = useCallback((index: number) => {
-    if (!directionsRendererRef.current) return;
-    directionsRendererRef.current.setRouteIndex(index);
+    // With ORS, we typically get one main route. This can be extended if ORS provides alternatives.
     setNavigationState((prev) => ({ ...prev, selectedRoute: index }));
   }, []);
 
   // Start navigation
   const startNavigation = useCallback((mode: 'simulate' | 'real') => {
     const { routes, selectedRoute } = navigationState;
-    if (routes.length === 0) return;
+    if (routes.length === 0 || !map) return;
 
     const route = routes[selectedRoute];
     routeIndexRef.current = 0;
@@ -207,34 +134,19 @@ export const useDirections = (map: google.maps.Map | null) => {
       ...prev,
       isNavigating: true,
       mode,
-      currentPosition: {
-        lat: route.polyline[0].lat(),
-        lng: route.polyline[0].lng(),
-      },
+      currentPosition: route.polyline.length > 0 ? {
+        lat: route.polyline[0].lat,
+        lng: route.polyline[0].lng,
+      } : null,
     }));
 
-    // Camera: zoom + 45° tilt + heading like Google Maps
     if (map && route.polyline.length > 0) {
-      const start = { lat: route.polyline[0].lat(), lng: route.polyline[0].lng() };
-      map.panTo(start);
+      const start = route.polyline[0];
+      map.panTo([start.lat, start.lng]);
       map.setZoom(18);
-
-      // 45° tilt (only works on vector maps; harmless otherwise)
-      map.setTilt(45);
-
-      // Heading based on initial segment bearing
-      if (route.polyline.length > 1) {
-        const a = route.polyline[0];
-        const b = route.polyline[1];
-        const heading = google.maps.geometry?.spherical?.computeHeading(a, b);
-        if (typeof heading === 'number' && Number.isFinite(heading)) {
-          map.setHeading(heading);
-        }
-      }
     }
 
     if (mode === 'simulate') {
-      // Simulate navigation along the route
       simulationIntervalRef.current = setInterval(() => {
         routeIndexRef.current++;
         const polyline = route.polyline;
@@ -244,37 +156,15 @@ export const useDirections = (map: google.maps.Map | null) => {
           return;
         }
 
-        const position = {
-          lat: polyline[routeIndexRef.current].lat(),
-          lng: polyline[routeIndexRef.current].lng(),
-        };
+        const position = polyline[routeIndexRef.current];
 
-        // Update marker position
         if (currentMarkerRef.current) {
-          currentMarkerRef.current.setPosition(position);
+          currentMarkerRef.current.setLatLng([position.lat, position.lng]);
         } else if (map) {
-          // Rotate arrow to match movement direction
-          const prevPoint = polyline[Math.max(0, routeIndexRef.current - 1)];
-          const nextPoint = polyline[routeIndexRef.current];
-          const heading = google.maps.geometry?.spherical?.computeHeading(prevPoint, nextPoint) ?? 0;
-
-          currentMarkerRef.current = new google.maps.Marker({
-            position,
-            map,
-            icon: {
-              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-              scale: 6,
-              fillColor: '#8B7355',
-              fillOpacity: 1,
-              strokeWeight: 2,
-              strokeColor: '#FFFFFF',
-              rotation: heading,
-            },
-          });
+          currentMarkerRef.current = L.marker([position.lat, position.lng]).addTo(map);
         }
 
-        // Pan map to follow
-        map?.panTo(position);
+        map?.panTo([position.lat, position.lng]);
 
         setNavigationState((prev) => ({
           ...prev,
@@ -284,7 +174,6 @@ export const useDirections = (map: google.maps.Map | null) => {
     } else {
       // Real GPS tracking
       if (navigator.geolocation) {
-        // Clear any previous watcher
         if (watchIdRef.current !== null) {
           navigator.geolocation.clearWatch(watchIdRef.current);
           watchIdRef.current = null;
@@ -298,23 +187,12 @@ export const useDirections = (map: google.maps.Map | null) => {
             };
 
             if (currentMarkerRef.current) {
-              currentMarkerRef.current.setPosition(pos);
+              currentMarkerRef.current.setLatLng([pos.lat, pos.lng]);
             } else if (map) {
-              currentMarkerRef.current = new google.maps.Marker({
-                position: pos,
-                map,
-                icon: {
-                  path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                  scale: 6,
-                  fillColor: '#8B7355',
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: '#FFFFFF',
-                },
-              });
+              currentMarkerRef.current = L.marker([pos.lat, pos.lng]).addTo(map);
             }
 
-            map?.panTo(pos);
+            map?.panTo([pos.lat, pos.lng]);
 
             setNavigationState((prev) => ({
               ...prev,
@@ -340,12 +218,13 @@ export const useDirections = (map: google.maps.Map | null) => {
       watchIdRef.current = null;
     }
 
-    currentMarkerRef.current?.setMap(null);
+    currentMarkerRef.current?.remove();
     currentMarkerRef.current = null;
 
-    // Reset camera to normal
-    map?.setTilt(0);
-    map?.setHeading(0);
+    if (map && routePolylineRef.current) {
+      map.removeLayer(routePolylineRef.current);
+      routePolylineRef.current = null;
+    }
 
     setNavigationState((prev) => ({
       ...prev,
@@ -357,7 +236,10 @@ export const useDirections = (map: google.maps.Map | null) => {
   // Clear route
   const clearRoute = useCallback(() => {
     stopNavigation();
-    directionsRendererRef.current?.setDirections({ routes: [] } as any);
+    if (map && routePolylineRef.current) {
+      map.removeLayer(routePolylineRef.current);
+      routePolylineRef.current = null;
+    }
     setNavigationState({
       isNavigating: false,
       mode: 'simulate',
@@ -366,7 +248,7 @@ export const useDirections = (map: google.maps.Map | null) => {
       routes: [],
       selectedRoute: 0,
     });
-  }, [stopNavigation]);
+  }, [stopNavigation, map]);
 
   return {
     navigationState,

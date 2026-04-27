@@ -1,10 +1,10 @@
-/// <reference types="@types/google.maps" />
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import L from 'leaflet';
 import { X, Trash2 } from 'lucide-react';
 import { LatLng } from '@/types/map';
 
 interface MeasurementToolProps {
-  map: google.maps.Map | null;
+  map: L.Map | null;
   isActive: boolean;
   onClose: () => void;
 }
@@ -16,36 +16,30 @@ export const MeasurementTool: React.FC<MeasurementToolProps> = ({
 }) => {
   const [points, setPoints] = useState<LatLng[]>([]);
   const [totalDistance, setTotalDistance] = useState(0);
-  const markersRef = useRef<google.maps.Marker[]>([]);
-  const polylineRef = useRef<google.maps.Polyline | null>(null);
-  const clickListenerRef = useRef<google.maps.MapsEventListener | null>(null);
+  const markersRef = useRef<L.Marker[]>([]);
+  const polylineRef = useRef<L.Polyline | null>(null);
+  const clickListenerRef = useRef<L.LeafletEventHandlerFn | null>(null);
 
   // Calculate distance between two points
   const calculateDistance = useCallback((p1: LatLng, p2: LatLng): number => {
-    if (!window.google?.maps?.geometry) return 0;
-    return google.maps.geometry.spherical.computeDistanceBetween(
-      new google.maps.LatLng(p1.lat, p1.lng),
-      new google.maps.LatLng(p2.lat, p2.lng)
-    );
+    const latLng1 = L.latLng(p1.lat, p1.lng);
+    const latLng2 = L.latLng(p2.lat, p2.lng);
+    return latLng1.distanceTo(latLng2);
   }, []);
 
   // Add point
   const addPoint = useCallback((position: LatLng) => {
     if (!map) return;
 
-    const marker = new google.maps.Marker({
-      position,
-      map,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: '#8B7355',
-        fillOpacity: 1,
-        strokeWeight: 3,
-        strokeColor: '#FFFFFF',
-      },
+    const marker = L.marker([position.lat, position.lng], {
       draggable: true,
-    });
+      icon: L.divIcon({
+        className: 'measurement-marker-icon',
+        html: '<div style="background-color: #8B7355; border-radius: 50%; width: 16px; height: 16px; border: 2px solid #FFFFFF;"></div>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      }),
+    }).addTo(map);
 
     markersRef.current.push(marker);
 
@@ -54,8 +48,8 @@ export const MeasurementTool: React.FC<MeasurementToolProps> = ({
       
       // Update polyline
       if (polylineRef.current) {
-        polylineRef.current.setPath(
-          newPoints.map((p) => new google.maps.LatLng(p.lat, p.lng))
+        polylineRef.current.setLatLngs(
+          newPoints.map((p) => [p.lat, p.lng])
         );
       }
 
@@ -70,7 +64,10 @@ export const MeasurementTool: React.FC<MeasurementToolProps> = ({
     });
 
     // Handle marker drag
-    marker.addListener('drag', () => {
+    marker.on('drag', () => {
+      updatePolyline();
+    });
+    marker.on('dragend', () => {
       updatePolyline();
     });
   }, [map, calculateDistance]);
@@ -78,13 +75,13 @@ export const MeasurementTool: React.FC<MeasurementToolProps> = ({
   // Update polyline from markers
   const updatePolyline = useCallback(() => {
     const newPoints = markersRef.current.map((m) => {
-      const pos = m.getPosition()!;
-      return { lat: pos.lat(), lng: pos.lng() };
+      const pos = m.getLatLng();
+      return { lat: pos.lat, lng: pos.lng };
     });
 
     if (polylineRef.current) {
-      polylineRef.current.setPath(
-        newPoints.map((p) => new google.maps.LatLng(p.lat, p.lng))
+      polylineRef.current.setLatLngs(
+        newPoints.map((p) => [p.lat, p.lng])
       );
     }
 
@@ -103,40 +100,39 @@ export const MeasurementTool: React.FC<MeasurementToolProps> = ({
     if (!map || !isActive) return;
 
     // Create polyline
-    polylineRef.current = new google.maps.Polyline({
-      map,
-      strokeColor: '#8B7355',
-      strokeWeight: 3,
-      strokeOpacity: 0.8,
-    });
+    polylineRef.current = L.polyline([], {
+      color: '#8B7355',
+      weight: 3,
+      opacity: 0.8,
+    }).addTo(map);
 
     // Add click listener
-    clickListenerRef.current = map.addListener('click', (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) {
-        addPoint({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-      }
-    });
+    const clickHandler = (e: L.LeafletMouseEvent) => {
+      addPoint({ lat: e.latlng.lat, lng: e.latlng.lng });
+    };
+    map.on('click', clickHandler);
+    clickListenerRef.current = clickHandler;
 
-    // Change cursor
-    map.setOptions({ draggableCursor: 'crosshair' });
+    // Change cursor (Leaflet handles this with CSS, or custom CSS)
+    map.getContainer().style.cursor = 'crosshair';
 
     return () => {
       // Cleanup
       if (clickListenerRef.current) {
-        google.maps.event.removeListener(clickListenerRef.current);
+        map.off('click', clickListenerRef.current);
       }
-      polylineRef.current?.setMap(null);
-      markersRef.current.forEach((m) => m.setMap(null));
+      polylineRef.current?.remove();
+      markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
-      map.setOptions({ draggableCursor: null });
+      map.getContainer().style.cursor = ''; // Reset cursor
     };
   }, [map, isActive, addPoint]);
 
   // Clear measurements
   const clearMeasurements = () => {
-    markersRef.current.forEach((m) => m.setMap(null));
+    markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    polylineRef.current?.setPath([]);
+    polylineRef.current?.setLatLngs([]);
     setPoints([]);
     setTotalDistance(0);
   };

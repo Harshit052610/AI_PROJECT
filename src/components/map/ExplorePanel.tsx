@@ -1,16 +1,15 @@
-/// <reference types="@types/google.maps" />
 import React, { useState, useCallback } from 'react';
-import { X, MapPin, Star, Clock, ChevronRight, Loader2 } from 'lucide-react';
+import { X, MapPin, ChevronRight, Loader2 } from 'lucide-react';
 import { LatLng } from '@/types/map';
-import { usePlacesSearch } from '@/hooks/usePlacesSearch';
-import { PlaceSummary } from '@/components/map/PlaceDetailsSheet';
+import { usePlacesSearch, PlacePrediction } from '@/hooks/usePlacesSearch';
+import L from 'leaflet';
 
 interface ExplorePanelProps {
-  map: google.maps.Map | null;
+  map: L.Map | null;
   center: LatLng;
   isOpen: boolean;
   onClose: () => void;
-  onPlaceSelect: (place: PlaceSummary) => void;
+  onPlaceSelect: (place: PlacePrediction) => void;
 }
 
 const CATEGORIES = [
@@ -30,7 +29,7 @@ export const ExplorePanel: React.FC<ExplorePanelProps> = ({
   onPlaceSelect,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [places, setPlaces] = useState<any[]>([]);
+  const [places, setPlaces] = useState<PlacePrediction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const { searchNearby } = usePlacesSearch(map);
@@ -41,6 +40,9 @@ export const ExplorePanel: React.FC<ExplorePanelProps> = ({
     setPlaces([]);
 
     try {
+      // searchNearby with Nominatim currently returns an empty array.
+      // A more robust solution would involve integrating with a service like Overpass API.
+      console.warn('searchNearby with Nominatim is not fully implemented yet. Displaying dummy data or empty results.');
       const results = await searchNearby(center, category.type, 3000);
       setPlaces(results);
     } catch (error) {
@@ -99,43 +101,18 @@ export const ExplorePanel: React.FC<ExplorePanelProps> = ({
             {places.map((place, index) => (
               <button
                 key={place.placeId || index}
-                onClick={() =>
-                  onPlaceSelect({
-                    placeId: place.placeId,
-                    name: place.name,
-                    address: place.address,
-                    rating: place.rating,
-                    isOpen: place.isOpen,
-                    location: place.position,
-                  })
-                }
+                onClick={() => onPlaceSelect(place)}
                 className="w-full p-3 bg-secondary/50 hover:bg-secondary rounded-xl text-left transition-colors flex items-start gap-3"
               >
                 <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
                   <MapPin className="w-5 h-5 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{place.name}</div>
+                  <div className="font-medium text-sm truncate">{place.mainText}</div>
                   <div className="text-xs text-muted-foreground truncate">
-                    {place.address}
+                    {place.secondaryText}
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    {place.rating && (
-                      <div className="flex items-center gap-1">
-                        <Star className="w-3 h-3 text-warning fill-warning" />
-                        <span className="text-xs">{place.rating.toFixed(1)}</span>
-                      </div>
-                    )}
-                    {place.isOpen !== undefined && (
-                      <span
-                        className={`text-xs ${
-                          place.isOpen ? 'text-success' : 'text-destructive'
-                        }`}
-                      >
-                        {place.isOpen ? 'Open' : 'Closed'}
-                      </span>
-                    )}
-                  </div>
+                  {/* Rating and Open status are not directly available from Nominatim */}
                 </div>
                 <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
               </button>

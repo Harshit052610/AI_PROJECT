@@ -24,7 +24,6 @@ interface MapControlsProps {
   onToggle3D: () => void;
   onMapTypeChange: (type: MapType) => void;
   onLayerToggle: (layer: LayerType) => void;
-  onStreetView: () => void;
   onMeasure: () => void;
   onShare: () => void;
   showAccidentDots: boolean;
@@ -39,7 +38,6 @@ export const MapControls: React.FC<MapControlsProps> = ({
   onToggle3D,
   onMapTypeChange,
   onLayerToggle,
-  onStreetView,
   onMeasure,
   onShare,
   showAccidentDots,
@@ -69,8 +67,8 @@ export const MapControls: React.FC<MapControlsProps> = ({
               <div className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">
                 Map Type
               </div>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {(['roadmap', 'satellite', 'hybrid', 'terrain'] as MapType[]).map((type) => (
+              <div className="grid grid-cols-1 gap-2 mb-3">
+                {(['roadmap'] as MapType[]).map((type) => (
                   <button
                     key={type}
                     onClick={() => onMapTypeChange(type)}
@@ -88,37 +86,13 @@ export const MapControls: React.FC<MapControlsProps> = ({
                 Layers
               </div>
               <div className="space-y-1">
-                {[
-                  { id: 'traffic', label: 'Traffic', icon: '🚗' },
-                  { id: 'transit', label: 'Transit', icon: '🚌' },
-                  { id: 'bicycling', label: 'Bicycling', icon: '🚴' },
-                  { id: 'labels', label: 'Labels', icon: '🏷️' },
-                ].map((layer) => (
-                  <button
-                    key={layer.id}
-                    onClick={() => onLayerToggle(layer.id as LayerType)}
-                    className={`w-full px-3 py-2 text-xs rounded-lg flex items-center gap-2 transition-colors ${mapState.activeLayers.includes(layer.id as LayerType)
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary hover:bg-secondary/80'
-                      }`}
-                  >
-                    <span>{layer.icon}</span>
-                    {layer.label}
-                  </button>
-                ))}
+                {/* Leaflet layers will be handled differently or removed if no direct equivalent */}
               </div>
             </div>
           )}
         </div>
 
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button onClick={onStreetView} className="map-control-btn">
-              <Eye className="w-5 h-5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">Street View</TooltipContent>
-        </Tooltip>
+
 
         <Tooltip>
           <TooltipTrigger asChild>

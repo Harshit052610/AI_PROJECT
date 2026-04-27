@@ -1,5 +1,3 @@
-/// <reference types="@types/google.maps" />
-
 export interface LatLng {
   lat: number;
   lng: number;
@@ -42,7 +40,7 @@ export interface RouteInfo {
    * (We intentionally avoid random/demo safety scores.)
    */
   safetyScore?: number;
-  polyline: google.maps.LatLng[];
+  polyline: LatLng[];
   steps: RouteStep[];
   accidentCount?: number;
   shopCount?: number;

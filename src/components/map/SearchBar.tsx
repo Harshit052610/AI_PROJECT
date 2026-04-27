@@ -1,13 +1,11 @@
-/// <reference types="@types/google.maps" />
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, X, Menu, Clock, MapPin } from 'lucide-react';
-import { usePlacesSearch } from '@/hooks/usePlacesSearch';
-import { LatLng } from '@/types/map';
-import { PlaceSummary } from '@/components/map/PlaceDetailsSheet';
+import { usePlacesSearch, PlacePrediction } from '@/hooks/usePlacesSearch';
+import L from 'leaflet';
 
 interface SearchBarProps {
-  map: google.maps.Map | null;
-  onPlaceSelect: (place: PlaceSummary) => void;
+  map: L.Map | null;
+  onPlaceSelect: (place: PlacePrediction) => void;
   onMenuClick: () => void;
 }
 
@@ -47,20 +45,11 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelect = async (prediction: any) => {
-    const details = await selectPrediction(prediction);
-    if (details) {
-      setQuery(details.name);
-      setIsFocused(false);
-      onPlaceSelect({
-        placeId: details.placeId,
-        name: details.name,
-        address: details.address,
-        rating: details.rating,
-        isOpen: details.isOpen,
-        location: details.position,
-      });
-    }
+  const handleSelect = async (prediction: PlacePrediction) => {
+    await selectPrediction(prediction);
+    setQuery(prediction.mainText);
+    setIsFocused(false);
+    onPlaceSelect(prediction);
   };
 
   const handleClear = () => {
