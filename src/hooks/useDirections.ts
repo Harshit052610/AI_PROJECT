@@ -34,54 +34,55 @@ export const useDirections = (map: L.Map | null) => {
         return { routes: [], status: 'API_KEY_MISSING' };
       }
 
-      const profile = travelMode.toLowerCase(); // LocationIQ profiles are lowercase (e.g., 'driving')
+      const profile = travelMode.toLowerCase() === 'walking' ? 'walking' : 
+                      travelMode.toLowerCase() === 'bicycling' ? 'cycling' : 'driving';
       const coordinates = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
-      const apiUrl = `https://api.locationiq.com/v1/directions/${profile}/?key=${LOCATIONIQ_API_KEY}&overview=full&coordinates=${coordinates}`;
+      // Updated URL format to match LocationIQ documentation: https://us1.locationiq.com/v1/directions/{profile}/{coordinates}
+      const apiUrl = `https://us1.locationiq.com/v1/directions/${profile}/${coordinates}?key=${LOCATIONIQ_API_KEY}&overview=full&geometries=geojson&steps=true`;
       console.log('LocationIQ API URL:', apiUrl);
 
       try {
-        const response = await fetch(apiUrl, {
-          method: 'GET', // LocationIQ uses GET for directions
-          headers: {
-            'Accept': 'application/json',
-          },
-        });
+        const response = await fetch(apiUrl);
         console.log('LocationIQ raw response:', response);
 
         if (!response.ok) {
           const errorBody = await response.json();
           console.error('LocationIQ API error:', errorBody);
-          return { routes: [], status: `LOCATIONIQ_ERROR: ${errorBody.error}` };
+          return { routes: [], status: `LOCATIONIQ_ERROR: ${errorBody.error || errorBody.message}` };
         }
 
         const data = await response.json();
         console.log('LocationIQ raw data:', data);
+        
         if (data.routes && data.routes.length > 0) {
           const route = data.routes[0];
-          const routeCoordinates = route.geometry.coordinates.map((coord: [number, number]) => ({
-            lng: coord[0],
+          
+          // When using geometries=geojson, route.geometry.coordinates is an array of [lng, lat]
+          const leafletPolyline: LatLng[] = route.geometry.coordinates.map((coord: [number, number]) => ({
             lat: coord[1],
+            lng: coord[0],
           }));
 
-          // Convert LocationIQ polyline to Leaflet LatLng array
-          const leafletPolyline: LatLng[] = routeCoordinates.map((coord: LatLng) => ({
-            lat: coord.lat,
-            lng: coord.lng,
-          }));
+          const distanceFormatted = (route.distance / 1000).toFixed(1) + ' km';
+          const durationFormatted = Math.round(route.duration / 60) + ' min';
 
-          const distance = (route.distance / 1000).toFixed(1) + ' km';
-          const duration = Math.round(route.duration / 60) + ' min';
+          // Extract steps if available
+          const steps = route.legs?.[0]?.steps?.map((step: any) => ({
+            instruction: step.maneuver?.instruction || 'Continue',
+            distance: step.distance,
+            duration: step.duration,
+          })) || [];
 
           const routes: RouteInfo[] = [{
-            id: 'locationiq-route-1',
-            distance: distance,
-            duration: duration,
-            safetyScore: 80, // Placeholder
+            id: `locationiq-route-${Date.now()}`,
+            distance: distanceFormatted,
+            duration: durationFormatted,
+            safetyScore: 85, // Default base score
             polyline: leafletPolyline,
-            steps: [], // LocationIQ provides detailed steps, need to parse them
-            accidentCount: 0, // Placeholder
-            shopCount: 0, // Placeholder
-            publicDensity: 'Medium', // Placeholder
+            steps: steps,
+            accidentCount: accidentZones.length > 0 ? 0 : 0, // Should calculate based on polyline intersection
+            shopCount: safeShops.length,
+            publicDensity: 'Medium',
             isFastest: true,
           }];
 
@@ -98,8 +99,13 @@ export const useDirections = (map: L.Map | null) => {
             if (routePolylineRef.current) {
               map.removeLayer(routePolylineRef.current);
             }
-            routePolylineRef.current = L.polyline(leafletPolyline.map(p => [p.lat, p.lng]), { color: '#1A73E8', weight: 5, opacity: 0.85 }).addTo(map);
-            map.fitBounds(routePolylineRef.current.getBounds());
+            routePolylineRef.current = L.polyline(leafletPolyline.map(p => [p.lat, p.lng]), { 
+              color: '#1A73E8', 
+              weight: 6, 
+              opacity: 0.8,
+              lineJoin: 'round'
+            }).addTo(map);
+            map.fitBounds(routePolylineRef.current.getBounds(), { padding: [50, 50] });
           }
 
           return { routes };
@@ -183,21 +189,32 @@ export const useDirections = (map: L.Map | null) => {
               lng: position.coords.longitude,
             };
 
+            console.log('Real Nav Position:', pos);
+
             if (currentMarkerRef.current) {
               currentMarkerRef.current.setLatLng([pos.lat, pos.lng]);
             } else if (map) {
-              currentMarkerRef.current = L.marker([pos.lat, pos.lng]).addTo(map);
+              const icon = L.divIcon({
+                className: 'custom-div-icon',
+                html: "<div style='background-color:#4285F4;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 5px rgba(0,0,0,0.3);'></div>",
+                iconSize: [16, 16],
+                iconAnchor: [8, 8]
+              });
+              currentMarkerRef.current = L.marker([pos.lat, pos.lng], { icon }).addTo(map);
             }
 
-            map?.panTo([pos.lat, pos.lng]);
+            map?.setView([pos.lat, pos.lng], map.getZoom() || 18);
 
             setNavigationState((prev) => ({
               ...prev,
               currentPosition: pos,
             }));
           },
-          (error) => console.error('GPS Error:', error),
-          { enableHighAccuracy: true, maximumAge: 0 }
+          (error) => {
+            console.error('GPS Error:', error);
+            // We could use an event emitter or callback here to show a toast in UI
+          },
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
       }
     }

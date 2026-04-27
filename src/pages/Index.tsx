@@ -117,7 +117,7 @@ const Index = () => {
         } else if (res.status) {
           toast({
             title: 'No routes found',
-            description: `Google status: ${res.status}`,
+            description: `LocationIQ status: ${res.status}`,
           });
         }
       }
@@ -319,7 +319,7 @@ const Index = () => {
           if (primary.routes.length === 0) {
             toast({
               title: 'No routes found',
-              description: primary.status ? `Google status: ${primary.status}` : 'Try a different destination.',
+              description: primary.status ? `LocationIQ status: ${primary.status}` : 'Try a different destination.',
             });
           }
         }}
@@ -465,12 +465,15 @@ const Index = () => {
           if (primary.routes.length === 0) {
             toast({
               title: 'No routes found',
-              description: primary.status ? `Google status: ${primary.status}` : 'Try a different destination.',
+              description: primary.status ? `LocationIQ status: ${primary.status}` : 'Try a different destination.',
             });
             return;
           }
 
-          startNavigation('simulate');
+          toast({
+            title: 'Route planned',
+            description: 'Choose your navigation mode and click Start.',
+          });
         }}
       />
     </div>

@@ -37,7 +37,7 @@ export const DirectionsPanel: React.FC<DirectionsPanelProps> = ({
           {lastDirectionsStatus ? (
             <div className="space-y-1">
               <div>No routes returned.</div>
-              <div className="text-xs">Google status: <span className="font-mono">{lastDirectionsStatus}</span></div>
+              <div className="text-xs">LocationIQ status: <span className="font-mono">{lastDirectionsStatus}</span></div>
               <div className="text-xs">If you see <span className="font-mono">REQUEST_DENIED</span>, your API key restrictions/billing are blocking Directions.</div>
             </div>
           ) : (
